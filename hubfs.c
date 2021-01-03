@@ -87,7 +87,7 @@ static char Enomem[] = "no memory";
 
 void wrsend(Hub *h);
 void msgsend(Hub *h);
-void hubcmd(char *cmd);
+int hubcmd(char *cmd);
 void setuphub(Hub *h);
 void addhub(Hub *h);
 void removehub(Hub *h);
@@ -375,8 +375,15 @@ fswrite(Req *r)
 	int j;
 
 	h = r->fid->file->aux;
-	if(strncmp(h->name, "ctl", 3) == 0)
-		hubcmd(r->ifcall.data);
+	if(strncmp(h->name, "ctl", 3) == 0){
+		if(hubcmd(r->ifcall.data) == -1){
+			respond(r, "unrecognized command");
+			return;
+		}
+		r->ofcall.count = r->ifcall.count;
+		respond(r, nil);
+		return;
+	}
 
 	if(freeze == UP){
 		count = r->ifcall.count;
@@ -618,45 +625,40 @@ removehub(Hub *h)
 }
 
 /* issue eofs or set status of paranoid mode and frozen/normal from ctl messages */
-void
+int
 hubcmd(char *cmd)
 {
-	int i;
+	int i, rc;
 	char cmdbuf[256];
 
-	if(strncmp(cmd, "quit", 4) == 0)
+	rc = 0;
+	if(strncmp(cmd, "quit", 4) == 0){
 		sysfatal("hubfs: quit command received");
+	}else
 	if(strncmp(cmd, "fear", 4) == 0){
 		paranoia = UP;
 		fprint(2, "hubfs: paranoid mode activated\n");
-		return;
-	}
+	}else
 	if(strncmp(cmd, "calm", 4) == 0){
 		paranoia = DOWN;
 		fprint(2, "hubfs: non-paranoid mode resumed\n");
-		return;
-	}
+	}else
 	if(strncmp(cmd, "freeze", 6) == 0){
 		freeze = UP;
 		fprint(2, "hubfs: the pipes freeze in place\n");
-		return;
-	}
+	}else
 	if(strncmp(cmd, "melt", 4) == 0){
 		freeze = DOWN;
 		fprint(2, "hubfs: the pipes thaw\n");
-		return;
-	}
+	}else
 	if(strncmp(cmd, "trunc", 5) == 0){
 		trunc = UP;
 		fprint(2, "trunc mode set\n");
-		return;
-	}
+	}else
 	if(strncmp(cmd, "notrunc", 7) == 0){
 		trunc = DOWN;
 		fprint(2, "trunc mode off\n");
-		return;
-	}
-
+	}else
 	/* eof command received, check if it applies to single hub then dispatch */
 	if(strncmp(cmd, "eof", 3) == 0){
 		endoffile = UP;
@@ -669,14 +671,16 @@ hubcmd(char *cmd)
 			cmdbuf[i] = '\0';
 			eofhub(cmdbuf);
 			endoffile = DOWN;
-			return;
+		}else{
+			fprint(2, "hubfs: sending end of file to all client readers\n");
+			eofall();
+			endoffile = DOWN;
 		}
-		fprint(2, "hubfs: sending end of file to all client readers\n");
-		eofall();
-		endoffile = DOWN;
-		return;
+	}else{
+		fprint(2, "hubfs: no matching command found\n");
+		rc = -1;
 	}
-	fprint(2, "hubfs: no matching command found\n");
+	return rc;
 }
 
 /* send eof to specific named hub */
@@ -807,8 +811,8 @@ main(int argc, char **argv)
 
 	if(argc)
 		usage();
-	if(chatty9p)
-		fprint(2, "hubsrv.nopipe %d srvname %s mtpt %s\n", fs.nopipe, srvname, mtpt);
+//	if(chatty9p)
+//		fprint(2, "hubsrv.nopipe %d srvname %s mtpt %s\n", fs.nopipe, srvname, mtpt);
 	if(addr == nil && srvname == nil && mtpt == nil)
 		sysfatal("must specify -a, -s, or -m option");
 
